@@ -29,6 +29,7 @@ APP_ID = config.APP_ID
 AUTH_API = "https://login.microsoftonline.com/common/oauth2/v2.0/"
 MS_GRAPH = "https://graph.microsoft.com/v1.0/"
 REDIRECT_URI = "http://localhost:5000/login/authorized"
+REDIRECT_URI_MS = "https://login.microsoftonline.com/common/oauth2/nativeclient"
 RESPONSE_TYPE = "code"
 SCOPES = ["Files.ReadWrite.All", "offline_access", "User.Read",] # space-separated list
 
@@ -161,6 +162,21 @@ class OAuthManager:
         self._available_cond.notify_all()
         self._available_cond.release()
 
+    @classmethod
+    def get_auth_code(cls):
+        """Step 1"""
+        api = f"{AUTH_API}authorize"
+        query_kw = cls.get_query_dict({
+            "scope": " ".join(SCOPES),
+            "response_type": "code",
+            "client_secret": None,
+        })
+        query_str = urllib.parse.urlencode(query_kw, quote_via=urllib.parse.quote)
+        url_str = f"{api}?{query_str}"
+        print(url_str)
+        return url_str
+
+
     async def redeem_code_tokens(self, code):
         """Step 2 in https://docs.microsoft.com/en-us/onedrive/developer/rest-api/getting-started/graph-oauth
         """
@@ -189,6 +205,7 @@ class Application(tornado.web.Application):
             (r"/login/(?P<action>\S+?)/?", OAuthorizedHandler,),
             (r"/api/start/", StartHandler),
             (r"/api/list/", ApiListHandler),
+            (r"/api/debug/(?P<test>.+?)", ApiDebugHandler),
         ]
         settings = {
             "debug": True,
@@ -242,6 +259,16 @@ class StartHandler(tornado.web.RequestHandler):
             self.write_error(404)
             return
 
+class ApiDebugHandler(tornado.web.RequestHandler):
+    @property
+    def oauth_manager(self):
+        return self.application.oauth_manager
+
+    async def get(self, test):
+        ret = await self.oauth_manager.request_api(f"{MS_GRAPH}{test}")
+        print(ret)
+        self.write(ret)
+
 class ApiListHandler(tornado.web.RequestHandler):
     @property
     def oauth_manager(self):
@@ -287,18 +314,22 @@ class OAuthorizedHandler(tornado.web.RequestHandler):
             self.application.oauth_manager.redeem_code_tokens(code))
         await task
 
+    @property
     def get_auth_code(self):
-        api = f"{AUTH_API}authorize"
-        query_kw = {
-            "client_id": APP_ID,
-            "scope": " ".join(SCOPES),
-            "response_type": "code",
-            "redirect_uri": REDIRECT_URI,
-        }
-        query_str = urllib.parse.urlencode(query_kw, quote_via=urllib.parse.quote)
-        url_str = f"{api}?{query_str}"
-        print(url_str)
-        return url_str
+        return self.application.oauth_manager.get_auth_code
+
+#    def get_auth_code(self):
+#        api = f"{AUTH_API}authorize"
+#        query_kw = {
+#            "client_id": APP_ID,
+#            "scope": " ".join(SCOPES),
+#            "response_type": "code",
+#            "redirect_uri": REDIRECT_URI,
+#        }
+#        query_str = urllib.parse.urlencode(query_kw, quote_via=urllib.parse.quote)
+#        url_str = f"{api}?{query_str}"
+#        print(url_str)
+#        return url_str
 
     async def fetch_auth_token(self):
         url_str = self.get_auth_code()
